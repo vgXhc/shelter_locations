@@ -1,0 +1,258 @@
+---
+title: "Where the shelter can't go: Using data to dissect city policy-making"
+description: |
+  Policymakers proposed criteria for a where a shelter for homeless men could and couldn't go. This post uses public data to visualize these criteria, showing that in the end the resolution would have meant that the shelter can't go anywhere.
+author:
+  - name: Nora Jones 
+    url: https://example.com/norajones
+    affiliation: Spacely Sprockets
+    affiliation_url: https://example.com/spacelysprokets
+date: "`r Sys.Date()`"
+output: distill::distill_article
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+
+
+library(tidyverse)
+library(sf)
+library(tmap)
+
+```
+
+This post is about using publicly available data to examine local policy proposals. A local blogger pointed out a resolution to the Madison Common Council that would have established a number of criteria for possible locations for a shelter for men experiencing homeless. The shelter had been debated for many years, and unsurprisingly it was controversial. The criteria specified in the draft resolution were as follows:
+
+- The site should be greater than .5 mile from any schools or daycares;
+- The site should not be located in a Census tract identified as a location of concentrated poverty
+- The site should include either an existing building or a lot large enough for new construction;
+- The site should include space for future expansion;
+- The site should be zoned for commercial or mixed use, and not adjacent to single-family homes;
+- The site should be within a few blocks of seven-days-a-week bus service, with a preference for close proximity to BRT routes;
+- The site location should be within a walking distance of within 3.5 miles from the Beacon on East Washington; and
+- The site should be an active real estate listing that is vacant or soon-to-be-vacant.
+
+That's a lot of places where the shelter must not be! It's also a number of criteria that I could easily map with publicly available data. The meeting at which the resolution would be first discussed was on the same day and I only had the morning before work and my lunch break to put something together. Therefore the product was not the prettiest, and in this post I make some improvements.
+
+## City limits
+What I should have done first but didn't was to start with the Madison city limits. The shelter is a city shelter and therefore must be within the City of Madison. There are multiple enclaves and exclaves, and so starting with the city limits as the most expansive possible search area should be step 1. Then we can use the other criteria to stamp out anything that doesn't fit. City limits [are available](https://data-cityofmadison.opendata.arcgis.com/datasets/city-limit/explore) on the City of Madison Open Data portal.
+
+```{r}
+city_limit <- st_read("data/City_Limit.shp") %>% 
+  st_transform(6610)
+
+tm_shape(city_limit) +
+  tm_polygons("green")
+```
+
+
+
+
+## Childcare locations and schools
+
+First of all, the idea that children need to be kept away from people experiencing homelessness is wrong. Second, most people don't realize how many schools and childcare locations there are. For childcare providers, the Wisconsin Department of Health and Human Services provides a [dataset](https://data.dhsgis.wi.gov/datasets/wisconsin-licensed-and-certified-childcare/) of "[p]oint locations and attributes of certified childcare facilities licensed by the state of Wisconsin." Public school data is [available](https://nces.ed.gov/programs/edge/Geographic/SchoolLocations) from the National Center for Education Statistics. Conveniently, both datasets are provided as shapefiles.
+
+
+First we read in the `child_care` data. I noticed that there is a "capacity" attribute in the dataset. To avoid debates of whether the resolution sponsors would consider someone who provides care to only a few children a "childcare facility," I filtered the data to only those providers with a capacity larger than 9. To create the half-mile buffers around the locations, I need to project the data to a different coordinate reference system (CRS). The `crsuggest` package helps identify an appropriate CRS. Note that the CRS I chose uses meters as its units, and so 0.5 miles needs to be provided as 805. Finally, I keep only the parts of the buffers that are within city limits.
+
+```{r}
+child_care <- st_read("data/Wisconsin_Licensed_and_Certified_Childcare.shp")
+
+child_care_buffers <- child_care %>% 
+  filter(COUNTY == "Dane") %>% 
+  filter(CAPACITY >9) %>% 
+  st_transform(6610) %>% 
+  st_buffer(dist = 805) %>% 
+  st_intersection(city_limit)
+```
+
+For the schools, the process was pretty much the same:
+```{r}
+
+schools <- st_read("data/EDGE_GEOCODE_PUBLICSCH_1920.shp") %>% 
+  filter(STATE == "WI") %>% 
+  filter(NMCNTY == "Dane County")
+
+schools_buffers <- schools %>% 
+  st_transform(6610) %>% 
+  st_buffer(dist = 805) %>% 
+  st_intersection(city_limit)
+```
+
+Now we can "cut out" the schools and childcare buffers from the city limit map:
+
+```{r}
+tm_shape(city_limit) +
+  tm_polygons("green") +
+  tm_shape(child_care_buffers) +
+  tm_polygons("red", alpha = 1, border.alpha = 0) +
+  tm_shape(schools_buffers) +
+  tm_polygons("red", alpha = 1, border.alpha = 0)
+```
+
+It's obvious: This criterion alone eliminate huge swaths of the city as possible locations.
+
+## Zoning districts
+
+> The site should be zoned for commercial or mixed use, and not adjacent to single-family homes;
+
+I've posted about zoning in Madison previously and so I'm pretty fam. Zoning data is on the Open Data portal.
+
+```{r}
+zoning <- st_read("data/Zoning_Districts.shp")
+```
+
+Which zoning districts should be included? [Ordinance](https://library.municode.com/wi/madison/codes/code_of_ordinances?nodeId=COORMAWIVOIICH20--31_CH28ZOCOOR_SUBCHAPTER_28BZODIMA) does have a high-level category called "Mixed use and commercial districts," which includes 
+
+- LMX Limited Mixed-Use
+- NMX Neighborhood Mixed-Use District
+- TSS Traditional Shopping Street District
+- MXC Mixed-Use Center District
+- CC-T Commercial Corridor - Transitional District
+- CC Commercial Center District
+- RMX Regional Mixed-Use District  
+
+Arguably, many would also consider some of the zoning districts listed under the "Downtown and Urban Core" heading as mixed use. As it has "mixed use" in its name, I'll include UMX Urban Mixed-Use. 
+
+```{r}
+mixed_use <- c("NMX", "TSS", "MXC", "CC-T", "CC", "UMX", "RMX")
+
+zoning_mixed_use <- zoning %>% 
+  filter(!(ZONING_COD %in% mixed_use)) %>% 
+  st_transform(st_crs(city_limit))
+```
+
+I'll overlay these in red again and change the color of the previously cut out areas to grey.
+
+```{r}
+tm_shape(city_limit) +
+  tm_polygons("green") +
+  tm_shape(zoning_mixed_use) +
+  tm_polygons("red", alpha = 1, border.alpha = 0) +
+  tm_shape(child_care_buffers) +
+  tm_polygons(alpha = 1, border.alpha = 0) +
+  tm_shape(schools_buffers) +
+  tm_polygons(alpha = 1, border.alpha = 0)
+```
+And there goes much of the rest of the city.
+
+## Close to the Beacon
+I probably could have stopped here, but as it's an interesting one, I'll add one more: The 3.5 mile walkshed around the [Beacon](https://thebeaconhelps.org/), an existing homeless services day center on East Washington Ave. For sending my letter, I used the OpenRouteService (ORS) web interface to generate the walkshed. However, it's also possible to access ORS through an R package, [`openrouteservice-r`](https://github.com/GIScience/openrouteservice-r), which I will do here. First, we geocode the Beacon's address:
+
+```{r}
+library(openrouteservice)
+beacon <- ors_geocode("615 E Washington Ave, Madison, WI 53703, USA", output = "sf")
+tm_shape(city_limit) +
+  tm_polygons()+
+  tm_shape(beacon) +
+  tm_dots("red")
+
+```
+Now we generate the 3.5 mile walking distance. The `ors_isochrone` functions requires the location to be a long/lat coordinate pair.
+
+```{r}
+beacon_coord <- st_coordinates(beacon)
+
+beacon_walkshed <- ors_isochrones(st_coordinates(beacon), 
+                                  profile = ors_profile("walking"),
+                                  units = "mi",
+                                  range = 3.5,
+                                  range_type = "distance",
+                                  #smoothing = "15", 
+                                  output = "sf") %>% 
+  st_transform(st_crs(city_limit))
+```
+
+Quick visual check:
+```{r}
+tm_shape(city_limit) +
+  tm_polygons(alpha = .1) +
+tm_shape(beacon_walkshed) +
+  tm_polygons("red", alpha = .3)
+```
+
+Again, we'll change the previously cut out parts to grey and show everything outside the walk shed in red.
+
+
+```{r}
+tmap_mode("plot")
+tm_shape(city_limit) +
+  tm_polygons("green") +
+  tm_shape(zoning_mixed_use) +
+  tm_polygons("red", alpha = 1, border.alpha = 0) +
+  tm_shape(child_care_buffers) +
+  tm_polygons(alpha = 1, border.alpha = 0) +
+  tm_shape(schools_buffers) +
+  tm_polygons(alpha = 1, border.alpha = 0) +
+  tm_shape(st_difference(city_limit, beacon_walkshed)) +
+  tm_polygons("red", border.alpha = 0)
+```
+# What's left?
+We could keep going with the remaining criteria, but a) they're harder to implement and b) it looks like not much green is left in the map above. This is a good moment to change to interactive viewing and see what those green areas are:
+
+```{r}
+whats_left <- st_difference(city_limit, zoning_mixed_use)
+
+whats_left <- st_difference(city_limit, walk_shed)
+
+tm_shape(whats_left) +
+  tm_polygons()
+```
+
+
+```{r}
+tmap_mode("view")
+tm_shape(city_limit) +
+  tm_polygons("green", alpha = .4) +
+  tm_shape(zoning_mixed_use) +
+  tm_polygons("red", alpha = .11, border.alpha = 0) +
+  tm_shape(child_care_buffers) +
+  tm_polygons(alpha = .11, border.alpha = 0) +
+  tm_shape(schools_buffers) +
+  tm_polygons(alpha = .11, border.alpha = 0) +
+  tm_shape(st_difference(city_limit, beacon_walkshed)) +
+  tm_polygons("red", alpha = .1, border.alpha = 0)
+```
+
+
+tmap_mode("view")
+  tm_shape(schools_buffers) +
+  tm_polygons("red", alpha = .2) +
+  tm_shape(child_care_buffers) +
+  tm_polygons("green", alpha = .2) +
+  tm_shape(zoning_mixed_use) +
+  tm_polygons("blue", alpha = .2) 
+  
+    
+alder <- st_read("data/Aldermanic_Districts.shp")  %>% 
+    filter(ALD_DIST %in% c("12", "14", "17"))
+
+  tm_shape(walk_shed) +
+  tm_polygons("yellow", alpha = .4) +
+    # tm_shape(alder) +
+    # tm_polygons("purple", alpha = .2) +
+    tm_shape(schools_buffers) +
+  tm_polygons("red", alpha = 1) +
+  tm_shape(child_care_buffers) +
+  tm_polygons("green", alpha = 1)  +
+  tm_shape(zoning_mixed_use) +
+  tm_polygons("blue", alpha = 1) 
+```
+
+•                     The site should be within a few blocks of seven-days-a-week bus service, with a preference for close proximity to BRT routes;
+
+Buses that run 7 days a week:
+2, 4, 5, 6, 7, 8, 80, 81, 82, 13, 17, 20, 22, 16, 31
+
+Define "a few blocks" as Metro service standard
+
+
+
+
+
+
+```{r}
+walk_shed <- st_read("data/ors-route_1625598617123.json")
+```
+
+
