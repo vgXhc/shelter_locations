@@ -10,6 +10,10 @@ date: "`r Sys.Date()`"
 repository_url: https://github.com/vgXhc/shelter_locations
 compare_updates_url:
 creative_commons: CC BY-SA
+categories:
+  - housing
+  - Madison (WI)
+  - map
 output: 
   distill::distill_article:
     toc: true
@@ -212,6 +216,8 @@ whats_left <- st_erase(whats_left, child_care_buffers)
 whats_left <- st_erase(whats_left, schools_buffers)
 
 whats_left <- st_erase(whats_left, zoning_mixed_use)
+
+tmap_options(check.and.fix = TRUE)
 
 tmap_mode("view")
 tm_shape(whats_left) +
