@@ -80,9 +80,7 @@ For the schools, the process was pretty much the same:
 
 ```{r}
 
-schools <- st_read("data/EDGE_GEOCODE_PUBLICSCH_1920.shp") %>% 
-  filter(STATE == "WI") %>% 
-  filter(NMCNTY == "Dane County")
+schools <- readRDS("data/EDGE_GEOCODE_PUBLICSCH_1920.RDS") #https://nces.ed.gov/opengis/rest/services/K12_School_Locations/EDGE_GEOCODE_PUBLICSCH_1920/MapServer
 
 schools_buffers <- schools %>% 
   st_transform(6610) %>% 
